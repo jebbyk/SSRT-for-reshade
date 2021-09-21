@@ -47,6 +47,8 @@ void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out 
 
 	normal = normal - float3(0.5, 0.5, 0.5);
 
+	normal = normalize(normal);
+
 
 	
 	float rayDirX = nrand(texcoord);
@@ -54,6 +56,8 @@ void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out 
 	float rayDirZ = nrand(texcoord * 100.0);
 
 	float3 rand = float3(rayDirX, rayDirY, rayDirZ) - float3(0.5, 0.5, 0.5);
+
+	rand = normalize(rand);
 	
 	float3 rayDir = -normal + rand;
 	
@@ -73,9 +77,12 @@ void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out 
 			float3 newDepth =  GetLinearizedDepth(newTexCoordCentred).xxx;
 			float3 newNormal = GetScreenSpaceNormal(newTexCoordCentred);
 
-			float dot = dot(newNormal, normal);
+			newNormal = newNormal - float3(0.5, 0.5, 0.5);
+			newNormal = normalize(newNormal);
 
-			if(newPosition.z > newDepth.x && newPosition.z < newDepth.x + 0.005 && dot < 2.0){
+			float dot = dot(newNormal, rayDir);
+
+			if(newPosition.z > newDepth.x && newPosition.z < newDepth.x + 0.01 && dot > 0.0){
 				float3 photon = tex2D(ReShade::BackBuffer, float4(newTexCoordCentred, 0, 0)).xyz;
 				
 				color = lerp(photon, color, 0.5);
