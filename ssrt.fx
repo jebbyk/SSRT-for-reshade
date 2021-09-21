@@ -4,6 +4,57 @@
 
 #include "ReShade.fxh"
 
+uniform float BASE_RAYS_LENGTH <
+	ui_type = "drag";
+	ui_min = 0.1; ui_max = 10.0;
+    ui_step = 0.1;
+    ui_label = "Base ray length";
+	ui_tooltip = "Increases distance of light spreading, decreases intersections detection quality";
+    ui_category = "Ray Tracing";
+> = 1.0;
+
+uniform int RAYS_AMOUNT <
+	ui_type = "drag";
+	ui_min = 1; ui_max = 8;
+    ui_step = 1;
+    ui_label = "Rays amount";
+	ui_tooltip = "Decreases noise amount";
+    ui_category = "Ray Tracing";
+> = 4;
+
+uniform int STEPS_PER_RAY <
+	ui_type = "drag";
+	ui_min = 1; ui_max = 32;
+    ui_step = 1;
+    ui_label = "Steps per ray";
+	ui_tooltip = "Increases quality of intersections detection";
+    ui_category = "Ray Tracing";
+> = 16;
+
+
+uniform float EFFECT_INTENSITY <
+	ui_type = "drag";
+	ui_min = 0.8; ui_max = 10.0;
+    ui_step = 0.1;
+    ui_label = "Effect intensity";
+	ui_tooltip = "Power of effect";
+    ui_category = "Ray Tracing";
+> = 1.0;
+
+
+uniform float DEPTH_PARAM <
+	ui_type = "drag";
+	ui_min = 0.001; ui_max = 1.0;
+    ui_step = 0.001;
+    ui_label = "Depth param";
+	ui_tooltip = "test";
+    ui_category = "Ray Tracing";
+> = 0.001;
+
+
+
+
+
 
 float GetLinearizedDepth(float2 texcoord)
 {
@@ -31,68 +82,66 @@ float nrand(float2 uv)
 
 void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
 {
+	float perspectiveCoeff = 1.5;
+
+	color = tex2D(ReShade::BackBuffer, float4(texcoord, 0, 0)).xyz;
 	float3 depth = GetLinearizedDepth(texcoord).xxx;
+	float3 normal = GetScreenSpaceNormal(texcoord);
 
 	float2 centredTexCoord = texcoord - float2(0.5, 0.5);
 
-	float perspectiveCoeff = 1.5;
-
-	float3 selfPosition = float3(centredTexCoord.x * depth.z * perspectiveCoeff, centredTexCoord.y * depth.z * perspectiveCoeff, depth.z);
-
-	float3 normal = GetScreenSpaceNormal(texcoord);
-
-	color = tex2D(ReShade::BackBuffer, float4(texcoord, 0, 0)).xyz;
-
-
 
 	normal = normal - float3(0.5, 0.5, 0.5);
-
 	normal = normalize(normal);
 
-
-	
-	float rayDirX = nrand(texcoord);
-	float rayDirY = nrand(texcoord * 10.0);
-	float rayDirZ = nrand(texcoord * 100.0);
-
-	float3 rand = float3(rayDirX, rayDirY, rayDirZ) - float3(0.5, 0.5, 0.5);
-
-	rand = normalize(rand);
-	
-	float3 rayDir = -normal + rand;
-	
-	rayDir = normalize(rayDir);
-
-
-
-	for(int i = 0; i <= 32; i++)
-	{
-		float3 newPosition = selfPosition + rayDir * 0.001;
-
-		float2 newTexCoord = float2(newPosition.x / (newPosition.z * perspectiveCoeff), newPosition.y / (newPosition.z * perspectiveCoeff));
-
-		float2 newTexCoordCentred = newTexCoord + float2(0.5, 0.5);
+	[loop]
+	for(int j = 0; j < RAYS_AMOUNT; j++){
+		float j1 = j + 1;
+		float3 selfPosition = float3(centredTexCoord.x * depth.z * perspectiveCoeff, centredTexCoord.y * depth.z * perspectiveCoeff, depth.z);
 		
-		if(newTexCoordCentred.x > 0.0 && newTexCoordCentred.x < 1.0 && newTexCoordCentred.y > 0.0 && newTexCoordCentred.y < 1.0){
-			float3 newDepth =  GetLinearizedDepth(newTexCoordCentred).xxx;
-			float3 newNormal = GetScreenSpaceNormal(newTexCoordCentred);
+		float rayDirX = nrand(texcoord * j1);
+		float rayDirY = nrand(texcoord * 10.0 * j1);
+		float rayDirZ = nrand(texcoord * 100.0 * j1);
 
-			newNormal = newNormal - float3(0.5, 0.5, 0.5);
-			newNormal = normalize(newNormal);
+		float3 rand = float3(rayDirX, rayDirY, rayDirZ) - float3(0.5, 0.5, 0.5);
 
-			float dot = dot(newNormal, rayDir);
+		rand = normalize(rand);
+		
+		float3 rayDir = -normal + rand;
+		
+		rayDir = normalize(rayDir);
 
-			if(newPosition.z > newDepth.x && newPosition.z < newDepth.x + 0.01 && dot > 0.0){
-				float3 photon = tex2D(ReShade::BackBuffer, float4(newTexCoordCentred, 0, 0)).xyz;
-				
-				color = lerp(photon, color, 0.5);
+		[loop]
+		for(int i = 0; i < STEPS_PER_RAY; i++)
+		{
+			float3 newPosition = selfPosition + rayDir * 0.01 * BASE_RAYS_LENGTH / STEPS_PER_RAY;
 
-				i = 64;
+			float2 newTexCoord = float2(newPosition.x / (newPosition.z * perspectiveCoeff), newPosition.y / (newPosition.z * perspectiveCoeff));
+
+			float2 newTexCoordCentred = newTexCoord + float2(0.5, 0.5);
+			
+			if(newTexCoordCentred.x > 0.0 && newTexCoordCentred.x < 1.0 && newTexCoordCentred.y > 0.0 && newTexCoordCentred.y < 1.0){
+				float3 newDepth =  GetLinearizedDepth(newTexCoordCentred).xxx;
+				float3 newNormal = GetScreenSpaceNormal(newTexCoordCentred);
+
+				newNormal = newNormal - float3(0.5, 0.5, 0.5);
+				newNormal = normalize(newNormal);
+
+				float dot = dot(newNormal, rayDir);
+
+				if(newPosition.z > newDepth.x && newPosition.z < newDepth.x + DEPTH_PARAM && dot > 0.0){
+					float3 photon = tex2D(ReShade::BackBuffer, float4(newTexCoordCentred, 0, 0)).xyz;
+					
+					color = lerp(photon, color, (1.0 - (1.0 / (RAYS_AMOUNT + 2))) / EFFECT_INTENSITY);
+
+					i = STEPS_PER_RAY;
+				}
 			}
-		}
 
-		selfPosition = newPosition;
+			selfPosition = newPosition;
+		}
 	}
+	
 
 }
 
