@@ -11,16 +11,16 @@ uniform float BASE_RAYS_LENGTH <
     ui_label = "Base ray length";
 	ui_tooltip = "Increases distance of light spreading, decreases intersections detection quality";
     ui_category = "Ray Tracing";
-> = 1.0;
+> = 2.0;
 
 uniform int RAYS_AMOUNT <
 	ui_type = "drag";
-	ui_min = 1; ui_max = 8;
+	ui_min = 1; ui_max = 32;
     ui_step = 1;
     ui_label = "Rays amount";
 	ui_tooltip = "Decreases noise amount";
     ui_category = "Ray Tracing";
-> = 4;
+> = 9;
 
 uniform int STEPS_PER_RAY <
 	ui_type = "drag";
@@ -29,27 +29,45 @@ uniform int STEPS_PER_RAY <
     ui_label = "Steps per ray";
 	ui_tooltip = "Increases quality of intersections detection";
     ui_category = "Ray Tracing";
-> = 16;
+> = 32;
 
 
 uniform float EFFECT_INTENSITY <
 	ui_type = "drag";
-	ui_min = 0.8; ui_max = 10.0;
+	ui_min = 0.1; ui_max = 10.0;
     ui_step = 0.1;
     ui_label = "Effect intensity";
 	ui_tooltip = "Power of effect";
     ui_category = "Ray Tracing";
-> = 1.0;
+> = 2.0;
 
 
-uniform float DEPTH_PARAM <
+uniform float DEPTH_THRESHOLD <
 	ui_type = "drag";
-	ui_min = 0.001; ui_max = 1.0;
+	ui_min = 0.001; ui_max = 0.01;
     ui_step = 0.001;
-    ui_label = "Depth param";
+    ui_label = "Depth Threshold";
+	ui_tooltip = "Less accurate tracing but less noise at the same time";
+    ui_category = "Ray Tracing";
+> = 0.002;
+
+uniform float NORMAL_THRESHOLD <
+	ui_type = "drag";
+	ui_min = -1.0; ui_max = 1.0;
+    ui_step = 0.001;
+    ui_label = "Normal Threshold";
+	ui_tooltip = "More accurate tracing but more noise at the same time";
+    ui_category = "Ray Tracing";
+> = 0.0;
+
+uniform float PERSPECTIVE_COEFFITIENT <
+	ui_type = "drag";
+	ui_min = 0.0; ui_max = 10.0;
+    ui_step = 0.1;
+    ui_label = "Perspective coeff";
 	ui_tooltip = "test";
     ui_category = "Ray Tracing";
-> = 0.001;
+> = 1.0;
 
 
 
@@ -82,7 +100,7 @@ float nrand(float2 uv)
 
 void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
 {
-	float perspectiveCoeff = 1.5;
+	float perspectiveCoeff = PERSPECTIVE_COEFFITIENT;
 
 	color = tex2D(ReShade::BackBuffer, float4(texcoord, 0, 0)).xyz;
 	float3 depth = GetLinearizedDepth(texcoord).xxx;
@@ -129,11 +147,13 @@ void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out 
 
 				float dot = dot(newNormal, rayDir);
 
-				if(newPosition.z > newDepth.x && newPosition.z < newDepth.x + DEPTH_PARAM && dot > 0.0){
-					float3 photon = tex2D(ReShade::BackBuffer, float4(newTexCoordCentred, 0, 0)).xyz;
+				if(newPosition.z > newDepth.x && newPosition.z < newDepth.x + DEPTH_THRESHOLD ){
+					if(dot > NORMAL_THRESHOLD){
+						float3 photon = tex2D(ReShade::BackBuffer, float4(newTexCoordCentred, 0, 0)).xyz;
 					
-					color = lerp(photon, color, (1.0 - (1.0 / (RAYS_AMOUNT + 2))) / EFFECT_INTENSITY);
-
+						color += (photon / RAYS_AMOUNT) * EFFECT_INTENSITY;
+					}
+					
 					i = STEPS_PER_RAY;
 				}
 			}
