@@ -67,7 +67,7 @@ uniform float TEMPORAL_FACTOR <
     ui_label = "Temporal factor";
 	ui_tooltip = "Less noise but more ghosting";
     ui_category = "Filtering";
-> = 0.8;
+> = 0.9;
 
 uniform float BLURING_AMOUNT <
 	ui_type = "drag";
@@ -77,6 +77,38 @@ uniform float BLURING_AMOUNT <
 	ui_tooltip = "Less noise but less details";
     ui_category = "Filtering";
 > = 1.0;
+
+uniform float DEGHOSTING_TRESHOLD <
+	ui_type = "drag";
+	ui_min = 0.0; ui_max = 0.1;
+    ui_step = 0.001;
+    ui_label = "Deghosting treshold";
+	ui_tooltip = "Smaller number decreses ghosting caused by temporal gi blending but increases noise during movement";
+    ui_category = "Filtering";
+> = 0.002;
+
+uniform float PERSPECTIVE_COEFFITIENT <
+	ui_type = "drag";
+	ui_min = 0.0; ui_max = 10.0;
+    ui_step = 0.1;
+    ui_label = "Perpective coeffitient";
+	ui_tooltip = "Testing";
+    ui_category = "Experimental";
+> = 2.0;
+
+uniform float TONE <
+	ui_type = "drag";
+	ui_min = 0.0; ui_max = 10.0;
+    ui_step = 0.1;
+    ui_label = "Tone";
+	ui_tooltip = "Testing";
+    ui_category = "Experimental";
+> = 1.0;
+
+
+
+
+
 
 
 
@@ -89,14 +121,17 @@ sampler giTexture0	            					{ Texture = fGiTexture0;	    };
 texture fGiTexture1	            					{ Width = BUFFER_WIDTH;   Height = BUFFER_HEIGHT;   Format = RGBA16F; };
 sampler giTexture1	            					{ Texture = fGiTexture1;	    };
 
-texture fBlurTexture0	            					{ Width = BUFFER_WIDTH >> 1;   Height = BUFFER_HEIGHT >> 1;   Format = RGBA16F; };
+texture fBlurTexture0	            					{ Width = BUFFER_WIDTH;   Height = BUFFER_HEIGHT;   Format = RGBA16F; };
 sampler blurTexture0	            					{ Texture = fBlurTexture0;	    };
 
-texture fBlurTexture1	            					{ Width = BUFFER_WIDTH >> 2;   Height = BUFFER_HEIGHT >> 2;   Format = RGBA16F; };
+texture fBlurTexture1	            					{ Width = BUFFER_WIDTH;   Height = BUFFER_HEIGHT;   Format = RGBA16F; };
 sampler blurTexture1	            					{ Texture = fBlurTexture1;	    };
 
-texture fBlurTexture2	            					{ Width = BUFFER_WIDTH >> 3;   Height = BUFFER_HEIGHT >> 3;   Format = RGBA16F; };
+texture fBlurTexture2	            					{ Width = BUFFER_WIDTH;   Height = BUFFER_HEIGHT;   Format = RGBA16F; };
 sampler blurTexture2	            					{ Texture = fBlurTexture2;	    };
+
+// texture fNormalTexture0	            					{ Width = BUFFER_WIDTH;   Height = BUFFER_HEIGHT;   Format = RGBA16F; };
+// sampler normalTexture0	            					{ Texture = fNormalTexture;	    };
 
 texture fNoiseTexture < source = "bluenoise.png"; > { Width = 32; 			  Height = 32; 				Format = RGBA8; };
 sampler	noiseTexture          					{ Texture = fNoiseTexture; AddressU = WRAP; AddressV = WRAP;};
@@ -133,17 +168,29 @@ float3 rand3d(float2 uv)
 
 float2 getPixelSize() 	
 { 
-	return float2( 1.0 / 1366.0, 1.0 / 768.0); 
+	return float2( 1.0 / BUFFER_WIDTH, 1.0 / BUFFER_HEIGHT); 
+}
+
+float3 uvz_to_xyz(float2 uv, float z)
+{
+	uv -= float2(0.5, 0.5);
+	return float3(uv.x * z * PERSPECTIVE_COEFFITIENT, uv.y * z * PERSPECTIVE_COEFFITIENT, z);
+}
+
+float2 xyz_to_uv(float3 pos)
+{
+	float2 uv = float2(pos.x / (pos.z * PERSPECTIVE_COEFFITIENT), pos.y / (pos.z * PERSPECTIVE_COEFFITIENT));
+	return uv + float2(0.5, 0.5);
 }
 
 
-void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
+void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float4 color : SV_Target)
 {
 	
 
-	float perspectiveCoeff = 1.0;
+	float perspectiveCoeff = PERSPECTIVE_COEFFITIENT;
 
-	float3 depth = GetLinearizedDepth(texcoord).xxx;
+	float depth = GetLinearizedDepth(texcoord).x;
 	float3 normal = GetScreenSpaceNormal(texcoord);
 
 	float2 centredTexCoord = texcoord - float2(0.5, 0.5);
@@ -152,13 +199,15 @@ void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out 
 	[loop]
 	for(int j = 0; j < RAYS_AMOUNT; j++){
 		float j1 = j + 1;
-		float3 selfPosition = float3(centredTexCoord.x * depth.z * perspectiveCoeff, centredTexCoord.y * depth.z * perspectiveCoeff, depth.z);
+		float3 selfPosition = float3(centredTexCoord.x * depth * perspectiveCoeff, centredTexCoord.y * depth * perspectiveCoeff, depth);
 		
-		float3 rand = rand3d(texcoord * 32.0 * j1 + (frac(FRAME_COUNT / 256.0))) - float3(0.5, 0.5, 0.5);
+		float3 rand = rand3d(texcoord * 32.0 * j1 + (frac(FRAME_COUNT / 4.0))) - float3(0.5, 0.5, 0.5);
 
 		rand = normalize(rand);
 		
 		float3 rayDir = -normal - rand;
+
+		rayDir = normalize(rayDir);
 
 		float3 step = rayDir * 0.01 * BASE_RAYS_LENGTH / STEPS_PER_RAY;
 
@@ -172,14 +221,16 @@ void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out 
 			float2 newTexCoordCentred = newTexCoord + float2(0.5, 0.5);
 			
 			if(newTexCoordCentred.x > 0.0 && newTexCoordCentred.x < 1.0 && newTexCoordCentred.y > 0.0 && newTexCoordCentred.y < 1.0){
-				float3 newDepth =  GetLinearizedDepth(newTexCoordCentred).xxx;
+				float newDepth =  GetLinearizedDepth(newTexCoordCentred).x;
 				float3 newNormal = GetScreenSpaceNormal(newTexCoordCentred);
 
 				float dot = dot(newNormal, rayDir);
 
-				if(newPosition.z > newDepth.x && newPosition.z < newDepth.x + DEPTH_THRESHOLD ){
+				if(newPosition.z > newDepth && newPosition.z < newDepth + DEPTH_THRESHOLD ){
 					if(dot > NORMAL_THRESHOLD){
 						float3 photon = tex2D(ReShade::BackBuffer, float4(newTexCoordCentred, 0, 0)).xyz;
+
+						photon = pow(photon, 3.0);
 					
 						color += photon / (RAYS_AMOUNT + 1);
 					}
@@ -191,47 +242,59 @@ void Trace(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out 
 			selfPosition = newPosition;
 		}
 	}
-	color = color * (1.0 - TEMPORAL_FACTOR) + tex2D(giTexture1, float4(texcoord, 0, 0)).xyz * TEMPORAL_FACTOR;
+	float4 oldGI = tex2D(giTexture1, float4(texcoord, 0, 0)).xyzw;
+	oldGI.xyz *= TEMPORAL_FACTOR;
+	if(depth < oldGI.w + DEGHOSTING_TRESHOLD * 0.02 && depth > oldGI.w - DEGHOSTING_TRESHOLD * 0.02){
+		color = color * (1.0 - TEMPORAL_FACTOR) + oldGI.rgb;
+	}
+	color.w = depth;
 }
 
 void Combine(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
 {
+	float depth = GetLinearizedDepth(texcoord).x;
 	color = tex2D(ReShade::BackBuffer, float4(texcoord, 0, 0)).xyz;
-	color += tex2D(blurTexture2, float4(texcoord, 0, 0)).xyz * EFFECT_INTENSITY;
+	float giDepth = tex2D(blurTexture2, float4(texcoord, 0, 0)).w;
+	float3 gi = tex2D(blurTexture2, float4(texcoord, 0, 0)).rgb * EFFECT_INTENSITY;
+	gi = (color * gi * 0.9) + gi * 0.1;
+	gi = gi / (gi + TONE);
+	// if(depth < giDepth + TEST){
+		color += gi;
+	// }
 }
 
-void SaveGI(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
+void SaveGI(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float4 color : SV_Target)
 {
-	color = tex2D(giTexture0, float4(texcoord, 0, 0)).xyz;
+	color = tex2D(giTexture0, float4(texcoord, 0, 0)).xyzw;
 }
 
-void Downsample0(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
+void Downsample0(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float4 color : SV_Target)
 {
 	float2 ps = getPixelSize() * BLURING_AMOUNT;
-	color = tex2D(giTexture0, float4(texcoord + float2(-ps.x,-ps.x), 0, 0)).xyz;
-	color += tex2D(giTexture0, float4(texcoord + float2(ps.x, -ps.y), 0, 0)).xyz;
-	color += tex2D(giTexture0, float4(texcoord + float2(-ps.x, ps.y), 0, 0)).xyz;
-	color += tex2D(giTexture0, float4(texcoord + float2(ps.x, ps.y), 0, 0)).xyz;
+	color = tex2D(giTexture0, float4(texcoord + float2(-ps.x,-ps.x), 0, 0)).xyzw;
+	color += tex2D(giTexture0, float4(texcoord + float2(ps.x, -ps.y), 0, 0)).xyzw;
+	color += tex2D(giTexture0, float4(texcoord + float2(-ps.x, ps.y), 0, 0)).xyzw;
+	color += tex2D(giTexture0, float4(texcoord + float2(ps.x, ps.y), 0, 0)).xyzw;
 	color *= 0.25;
 }
 
-void Downsample1(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
+void Downsample1(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float4 color : SV_Target)
 {
 	float2 ps = getPixelSize() * 2 * BLURING_AMOUNT;
-	color = tex2D(blurTexture0, float4(texcoord + float2(-ps.x,-ps.x), 0, 0)).xyz;
-	color += tex2D(blurTexture0, float4(texcoord + float2(ps.x, -ps.y), 0, 0)).xyz;
-	color += tex2D(blurTexture0, float4(texcoord + float2(-ps.x, ps.y), 0, 0)).xyz;
-	color += tex2D(blurTexture0, float4(texcoord + float2(ps.x, ps.y), 0, 0)).xyz;
+	color = tex2D(blurTexture0, float4(texcoord + float2(-ps.x,-ps.x), 0, 0)).xyzw;
+	color += tex2D(blurTexture0, float4(texcoord + float2(ps.x, -ps.y), 0, 0)).xyzw;
+	color += tex2D(blurTexture0, float4(texcoord + float2(-ps.x, ps.y), 0, 0)).xyzw;
+	color += tex2D(blurTexture0, float4(texcoord + float2(ps.x, ps.y), 0, 0)).xyzw;
 	color *= 0.25;
 }
 
-void Downsample2(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float3 color : SV_Target)
+void Downsample2(in float4 position : SV_Position, in float2 texcoord : TEXCOORD, out float4 color : SV_Target)
 {
 	float2 ps = getPixelSize() * 4 * BLURING_AMOUNT;
-	color = tex2D(blurTexture1, float4(texcoord + float2(-ps.x,-ps.x), 0, 0)).xyz;
-	color += tex2D(blurTexture1, float4(texcoord + float2(ps.x, -ps.y), 0, 0)).xyz;
-	color += tex2D(blurTexture1, float4(texcoord + float2(-ps.x, ps.y), 0, 0)).xyz;
-	color += tex2D(blurTexture1, float4(texcoord + float2(ps.x, ps.y), 0, 0)).xyz;
+	color = tex2D(blurTexture1, float4(texcoord + float2(-ps.x,-ps.x), 0, 0)).xyzw;
+	color += tex2D(blurTexture1, float4(texcoord + float2(ps.x, -ps.y), 0, 0)).xyzw;
+	color += tex2D(blurTexture1, float4(texcoord + float2(-ps.x, ps.y), 0, 0)).xyzw;
+	color += tex2D(blurTexture1, float4(texcoord + float2(ps.x, ps.y), 0, 0)).xyzw;
 	color *= 0.25;
 }
 
